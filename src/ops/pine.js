@@ -35,9 +35,12 @@ async function activate(tab, editorRef) {
   return editor;
 }
 
-/** @returns {Promise<{success:true, button:string, editorIndex:number}>} */
-export async function compile(tab, editorRef) {
-  const editor = await activate(tab, editorRef);
+/**
+ * Trigger compilation on the currently-active editor: click "Save and add to
+ * chart", falling back to the CDP Ctrl+Enter shortcut if no button is found.
+ * @returns {Promise<string>} the button label or 'keyboard_shortcut'.
+ */
+async function triggerCompile(tab) {
   let button = unwrap(await callBridge(tab, { method: 'editor.compile', args: {} }));
   if (!button) {
     const c = await tab.client();
@@ -45,6 +48,13 @@ export async function compile(tab, editorRef) {
     await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
     button = 'keyboard_shortcut';
   }
+  return button;
+}
+
+/** @returns {Promise<{success:true, button:string, editorIndex:number}>} */
+export async function compile(tab, editorRef) {
+  const editor = await activate(tab, editorRef);
+  const button = await triggerCompile(tab);
   return { success: true, button, editorIndex: editor };
 }
 
@@ -80,7 +90,7 @@ export async function applyToPane(tab, { editor, pane, mode = 'replace', settleM
   const before = unwrap(await callBridge(tab, { method: 'pane.studies', args: { pane: paneIndex } }));
   const beforeIds = new Set(before.map((s) => s.id));
 
-  unwrap(await callBridge(tab, { method: 'editor.compile', args: {} }));
+  await triggerCompile(tab);
   if (settleMs) await new Promise((r) => setTimeout(r, settleMs));
 
   const after = unwrap(await callBridge(tab, { method: 'pane.studies', args: { pane: paneIndex } }));
