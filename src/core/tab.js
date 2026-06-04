@@ -2,7 +2,7 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
-import { getClient, reconnectToTarget } from '../connection.js';
+import { getClient, getSession } from '../connection.js';
 import { CDP_BASE_URL } from '../config.js';
 
 /**
@@ -81,29 +81,15 @@ export async function closeTab() {
 }
 
 /**
- * Switch to a tab by index. Reconnects CDP to the new target.
+ * Switch to a tab by index. Delegates to Session for activation + reconnect.
  */
 export async function switchTab({ index }) {
-  const tabs = await list();
+  const s = getSession();
+  const tabs = await s.listTabs();
   const idx = Number(index);
-
-  if (idx >= tabs.tab_count) {
-    throw new Error(`Tab index ${idx} out of range (have ${tabs.tab_count} tabs)`);
+  if (idx >= tabs.length) {
+    throw new Error(`Tab index ${idx} out of range (have ${tabs.length} tabs)`);
   }
-
-  const target = tabs.tabs[idx];
-
-  // 1) Bring the tab to the foreground in the desktop app.
-  try {
-    await fetch(`${CDP_BASE_URL}/json/activate/${target.id}`);
-  } catch (e) {
-    throw new Error(`Failed to activate tab ${idx}: ${e.message}`);
-  }
-
-  // 2) Re-point the MCP's CDP connection to this tab so subsequent reads
-  //    (chart_get_state, ui_evaluate, etc.) and commands target it — not the
-  //    originally-connected tab. Without this the switch is visual-only.
-  await reconnectToTarget(target.id);
-
-  return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
+  const tab = await s.switchTab(idx);
+  return { success: true, action: 'switched', index: idx, tab_id: tab.id, chart_id: tab.chartId };
 }
