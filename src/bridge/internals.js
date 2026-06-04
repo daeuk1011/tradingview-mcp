@@ -55,6 +55,10 @@ export function dispatch(internals, { method, args = {} }) {
         const r = paneOr(internals, args.pane);
         return r.err ? { ok: false, error: r.err } : { ok: true, value: internals.removeStudyByName(r.i, args.title, args.exceptId) };
       }
+      case 'editor.activate': {
+        const r = editorOr(internals, args.editor);
+        return r.err ? { ok: false, error: r.err } : { ok: true, value: r.acc.activate() };
+      }
       default:
         return { ok: false, error: `unknown bridge method "${method}"` };
     }

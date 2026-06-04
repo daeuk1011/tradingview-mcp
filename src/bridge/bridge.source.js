@@ -53,6 +53,14 @@ function INSTALL(version) {
               return { message: m.message, line: m.startLineNumber, severity: m.severity };
             });
           },
+          activate: function () {
+            try { ed.focus(); } catch (e) {}
+            try {
+              var tabs = document.querySelectorAll('[class*="scriptTab"], [class*="editorTab"]');
+              if (tabs[i]) tabs[i].click();
+            } catch (e) {}
+            return true;
+          },
         };
       },
       listPanes: function () {
@@ -105,6 +113,32 @@ function INSTALL(version) {
     };
   }
 
+  function clickCompile() {
+    var btns = document.querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++) {
+      var t = btns[i].textContent.trim();
+      if (/save and add to chart/i.test(t)) { btns[i].click(); return 'Save and add to chart'; }
+    }
+    for (var j = 0; j < btns.length; j++) {
+      var t2 = btns[j].textContent.trim();
+      if (/^(add to chart|update on chart)$/i.test(t2)) { btns[j].click(); return t2; }
+    }
+    return null;
+  }
+  function clickSave() {
+    var btns = document.querySelectorAll('button');
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) { btns[i].click(); return true; }
+    }
+    return false;
+  }
+  function readConsole() {
+    var out = [];
+    var rows = document.querySelectorAll('[class*="consoleRow"], [class*="consoleLine"]');
+    for (var i = 0; i < rows.length; i++) { var x = rows[i].textContent.trim(); if (x) out.push(x); }
+    return out;
+  }
+
   function paneOr(ref) {
     var panes = internals().listPanes();
     var i = Number(ref);
@@ -136,6 +170,10 @@ function INSTALL(version) {
           case 'focusPane': { var fp = paneOr(args.pane); return fp.err ? { ok: false, error: fp.err } : { ok: true, value: await internals().focusPane(fp.i) }; }
           case 'pane.studies': { var ps = paneOr(args.pane); return ps.err ? { ok: false, error: ps.err } : { ok: true, value: await internals().paneStudies(ps.i) }; }
           case 'pane.removeStudyByName': { var rp = paneOr(args.pane); return rp.err ? { ok: false, error: rp.err } : { ok: true, value: await internals().removeStudyByName(rp.i, args.title, args.exceptId) }; }
+          case 'editor.activate': { var ea = editorOr(args.editor); return ea.err ? { ok: false, error: ea.err } : { ok: true, value: ea.acc.activate() }; }
+          case 'editor.compile': return { ok: true, value: clickCompile() };
+          case 'editor.save': return { ok: true, value: clickSave() };
+          case 'editor.console': return { ok: true, value: readConsole() };
           default: return { ok: false, error: 'unknown bridge method "' + method + '"' };
         }
       } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }

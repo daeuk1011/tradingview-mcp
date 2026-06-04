@@ -98,3 +98,22 @@ describe('bridge dispatch — panes', () => {
     assert.deepEqual(int.paneStudies(0).map((s) => s.id), ['s2', 's3']);
   });
 });
+
+describe('bridge dispatch — editor.activate', () => {
+  function fakeEditorInternals() {
+    let active = 0;
+    return {
+      listEditors: () => [{ index: 0, name: 'a' }, { index: 1, name: 'b' }],
+      editorAt: (i) => (i === 0 || i === 1) ? { activate: () => { active = i; return true; } } : null,
+      get active() { return active; },
+    };
+  }
+  it('editor.activate in range', () => {
+    assert.deepEqual(dispatch(fakeEditorInternals(), { method: 'editor.activate', args: { editor: 1 } }), { ok: true, value: true });
+  });
+  it('editor.activate out of range -> ok:false', () => {
+    const r = dispatch(fakeEditorInternals(), { method: 'editor.activate', args: { editor: 9 } });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /editor 9 out of range \(open: 0=a, 1=b\)/);
+  });
+});
