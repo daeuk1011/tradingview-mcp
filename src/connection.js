@@ -1,16 +1,58 @@
 import CDP from 'chrome-remote-interface';
 import { CDP_HOST, CDP_PORT, CDP_BASE_URL } from './config.js';
 import { createDebugLogger } from './debug.js';
+import { Session } from './session/session.js';
 
 const debug = createDebugLogger('cdp');
 
-let client = null;
-let targetInfo = null;
-// When set, connect() prefers this specific CDP target id over first-in-list.
-// Set by tab.switchTab() so reads/commands follow the tab the user switched to.
-let preferredTargetId = null;
-const MAX_RETRIES = 5;
-const BASE_DELAY = 500;
+let session = null;
+
+/** The process-wide Session singleton (one TradingView app). */
+export function getSession() {
+  if (!session) {
+    session = new Session({
+      baseUrl: CDP_BASE_URL,
+      connect: async (targetId) => {
+        const c = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
+        await c.Runtime.enable();
+        await c.Page.enable();
+        await c.DOM.enable();
+        return c;
+      },
+    });
+  }
+  return session;
+}
+
+/** Back-compat: the active tab's CDP client. */
+export async function getClient() {
+  const s = getSession();
+  return s.run(async () => (await s.activeTab()).client());
+}
+
+/** Back-compat: target metadata of the active tab. */
+export async function getTargetInfo() {
+  const s = getSession();
+  const tab = await s.activeTab();
+  return { id: tab.id, url: tab.url, chartId: tab.chartId };
+}
+
+export async function evaluate(expression, opts = {}) {
+  const s = getSession();
+  debug('evaluate', expression.length > 200 ? expression.slice(0, 200) + `…(${expression.length} chars)` : expression);
+  return s.run(async () => {
+    const tab = await s.activeTab();
+    return tab.evaluate(expression, { awaitPromise: opts.awaitPromise ?? false });
+  });
+}
+
+export async function evaluateAsync(expression) {
+  return evaluate(expression, { awaitPromise: true });
+}
+
+export async function disconnect() {
+  session = null;
+}
 
 // Known direct API paths discovered via live probing (see PROBE_RESULTS.md)
 const KNOWN_PATHS = {
@@ -50,112 +92,6 @@ export function requireFinite(value, name) {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number, got: ${value}`);
   return n;
-}
-
-export async function getClient() {
-  if (client) {
-    try {
-      // Quick liveness check
-      await client.Runtime.evaluate({ expression: '1', returnByValue: true });
-      return client;
-    } catch {
-      client = null;
-      targetInfo = null;
-    }
-  }
-  return connect();
-}
-
-export async function connect() {
-  let lastError;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const target = await findChartTarget();
-      if (!target) {
-        throw new Error('No TradingView chart target found. Is TradingView open with a chart?');
-      }
-      targetInfo = target;
-      client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: target.id });
-
-      // Enable required domains
-      await client.Runtime.enable();
-      await client.Page.enable();
-      await client.DOM.enable();
-
-      return client;
-    } catch (err) {
-      lastError = err;
-      const delay = Math.min(BASE_DELAY * Math.pow(2, attempt), 30000);
-      await new Promise(r => setTimeout(r, delay));
-    }
-  }
-  throw new Error(`CDP connection failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
-}
-
-async function findChartTarget() {
-  const resp = await fetch(`${CDP_BASE_URL}/json/list`);
-  const targets = await resp.json();
-  // If a specific tab was selected via switchTab, pin to it (as long as it still exists).
-  if (preferredTargetId) {
-    const preferred = targets.find(t => t.type === 'page' && t.id === preferredTargetId);
-    if (preferred) return preferred;
-    // Preferred tab is gone (closed) — fall back to default selection.
-    preferredTargetId = null;
-  }
-  // Prefer targets with tradingview.com/chart in the URL
-  return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
-    || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
-    || null;
-}
-
-/**
- * Re-point the active CDP connection to a specific tab target id.
- * Closes the cached client so the next getClient() reconnects to the chosen tab.
- * Without this, switching the desktop tab leaves all reads/commands pinned to
- * the originally-connected tab.
- */
-export async function reconnectToTarget(targetId) {
-  preferredTargetId = targetId;
-  await disconnect();
-  return getClient();
-}
-
-export async function getTargetInfo() {
-  if (!targetInfo) {
-    await getClient();
-  }
-  return targetInfo;
-}
-
-export async function evaluate(expression, opts = {}) {
-  const c = await getClient();
-  debug('evaluate', expression.length > 200 ? expression.slice(0, 200) + `…(${expression.length} chars)` : expression);
-  const result = await c.Runtime.evaluate({
-    expression,
-    returnByValue: true,
-    awaitPromise: opts.awaitPromise ?? false,
-    ...opts,
-  });
-  if (result.exceptionDetails) {
-    const msg = result.exceptionDetails.exception?.description
-      || result.exceptionDetails.text
-      || 'Unknown evaluation error';
-    debug('evaluate FAILED:', msg);
-    throw new Error(`JS evaluation error: ${msg}`);
-  }
-  return result.result?.value;
-}
-
-export async function evaluateAsync(expression) {
-  return evaluate(expression, { awaitPromise: true });
-}
-
-export async function disconnect() {
-  if (client) {
-    try { await client.close(); } catch {}
-    client = null;
-    targetInfo = null;
-  }
 }
 
 // --- Direct API path helpers ---

@@ -1,17 +1,21 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
+import { tabParam, editorParam } from './_context.js';
 import * as core from '../core/pine.js';
 
 export function registerPineTools(server) {
-  server.tool('pine_get_source', 'Get current Pine Script source code from the editor', {}, async () => {
-    try { return jsonResult(await core.getSource()); }
+  server.tool('pine_get_source', 'Get Pine Script source from the editor (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.getSource({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_set_source', 'Set Pine Script source code in the editor', {
+  server.tool('pine_set_source', 'Set Pine Script source in the editor (optionally a specific tab/editor)', {
     source: z.string().describe('Pine Script source code to inject'),
-  }, async ({ source }) => {
-    try { return jsonResult(await core.setSource({ source })); }
+    tab: tabParam, editor: editorParam,
+  }, async ({ source, tab, editor }) => {
+    try { return jsonResult(await core.setSource({ source, tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -20,8 +24,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_get_errors', 'Get Pine Script compilation errors from Monaco markers', {}, async () => {
-    try { return jsonResult(await core.getErrors()); }
+  server.tool('pine_get_errors', 'Get Pine Script compilation errors (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.getErrors({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
