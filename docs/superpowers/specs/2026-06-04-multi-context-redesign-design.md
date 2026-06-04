@@ -44,6 +44,16 @@ nothing.
 - TypeScript migration of the whole codebase (separate decision; the resident
   bridge file is a natural place to apply `checkJs` typing).
 
+## Invariants
+
+- **Exactly one TradingView Desktop app instance.** "Multi-context" means
+  multiple chart **tabs within that single app** — never multiple apps. The
+  Session binds to one app at one CDP endpoint (`localhost:9222`); there is no
+  multi-app routing. The launch path enforces single-instance (kill any existing
+  TradingView before launch); a second detected app is an error/cleanup
+  condition, not a routed target. The connection pool's only job is multiplexing
+  the tabs of this one app.
+
 ## Key Decisions
 
 | Decision | Choice | Rationale |
@@ -109,6 +119,23 @@ window.__tvmcp.pane(index).symbol() / .setSymbol(s) / .studyValues() …
 Tools send **structured `{method, args}`** calls instead of assembling ad-hoc JS
 strings.
 
+**No cached internal references (correctness).** TradingView is an SPA — layout /
+symbol / script changes recreate `chartWidgetCollection` and Monaco editor
+instances wholesale. The bridge must therefore **hold zero long-lived references
+to TradingView internals and re-derive them on every call** (it knows *how to
+find* internals, never holds *what it found*). A bridge that cached references at
+injection time would silently operate on stale objects.
+
+**Async, awaitPromise, timeouts.** Many operations (`compile`, `save`,
+`setSymbol`, data loads) are TradingView Promises. Bridge methods distinguish
+sync vs async, the CDP call uses `awaitPromise`, and every call has a per-call
+timeout that surfaces as a structured `{ok:false, error:"timeout"}` — not a hang.
+
+**Authoring & injection mechanism.** To get the "one file, `checkJs`-able"
+benefit, `bridge.js` is authored as a real source file and its **source text is
+read and injected** (idempotent overwrite of `window.__tvmcp`) — it is never a
+giant inline string literal. This keeps it maintainable and type-checkable.
+
 Benefits:
 - TradingView updates → fix **one bridge file**, not ~60 evaluate strings.
 - Pane/editor indexing lives naturally in the bridge.
@@ -158,6 +185,14 @@ Resolution rules:
 - **Sequential now, B-ready:** one evaluate at a time. The pool is for
   *addressing*, not parallelism; B = a `Promise.all` fan-out layered on this pool
   later.
+- **Operation queue (determinism).** Node's `await` interleaves, so "sequential"
+  is *enforced* by a per-Session serialization queue: evaluates never overlap, and
+  `activeTabId` cannot change mid-flight of an active-omitted call. This is the
+  concrete guarantee behind "sequential A".
+- **Streams bind context at start.** Long-running CLI polling (`stream.js`)
+  resolves its `ContextRef` to a concrete handle **when it starts** and stays
+  bound to that handle — it does not follow `active` (which can move during the
+  stream).
 - **In-page objects (pane/editor) are not pooled** — they share the Tab's one
   client and differ only by bridge selector. Editors are **enumerated fresh each
   call** (the user can open/close editor tabs), not cached.
@@ -216,9 +251,11 @@ client):
 1. **Unit (new, broad):** inject a fake client into Tab → test handle
    resolution, selector generation, pool routing, active fallback, and error
    messages **without live TradingView**.
-2. **Bridge contract tests:** test `bridge.js` as pure functions / under jsdom —
-   `listEditors()`, `pane(i)` indexing, out-of-range errors against a fake
-   `window.__tvmcp`. Single file → apply `checkJs` typing here.
+2. **Bridge contract tests:** test only the bridge's **dispatch / indexing /
+   validation** logic against an injected fake `window.__tvmcp` internals shim —
+   `listEditors()`, `pane(i)` indexing, out-of-range errors. The real
+   fiber-walk / TradingView-internal resolution has **no jsdom equivalent and is
+   covered by e2e only**. Single file → apply `checkJs` typing here.
 3. **e2e (kept + extended):** against live TradingView. Add multi-tab /
    multi-editor scenarios — two tabs open, assert `tab:1` reads the right one and
    `editor:"name"` targets correctly — **regression-locking the bugs we just
@@ -231,7 +268,14 @@ assembly disappears; it is replaced/strengthened by bridge-arg validation tests.
 ## Migration Plan (spine first + vertical slice)
 
 Every phase: tests green, 79 tools working, easy to revert. `core/*` kept as
-compat shims until the end.
+compat shims until the end. **Shim consumers:** migrated tools call the new
+`ops/*` directly; the `core/*` shims exist only for the **CLI and existing
+tests** during migration, and are deleted in Phase 5.
+
+**Implementation-plan scope:** the first implementation plan covers **Phases 0–2
+only** (transport spine + bridge + Pine vertical slice, ending at the value-proof
+gate). Phases 3–5 (remaining-domain rollout) are a **separate decision after the
+gate**, to avoid a long half-migrated state.
 
 - **Phase 0 — Skeleton (harmless):** add `src/session/`, `src/bridge/`,
   `src/ops/` dirs. Nobody uses them yet.
