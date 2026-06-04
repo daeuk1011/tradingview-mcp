@@ -48,3 +48,53 @@ describe('bridge dispatch', () => {
     assert.match(res.error, /unknown bridge method "nope"/);
   });
 });
+
+// tests/bridge/internals.test.js  — append (pane dispatch tests)
+function fakePaneInternals() {
+  const panes = [
+    { symbol: 'A', resolution: '60', studies: [{ id: 's1', name: 'RSI' }, { id: 's2', name: 'MyX' }] },
+    { symbol: 'B', resolution: '5', studies: [] },
+  ];
+  let focused = 0;
+  return {
+    _panes: panes,
+    get focused() { return focused; },
+    listEditors: () => [],
+    editorAt: () => null,
+    listPanes: () => panes.map((p, i) => ({ index: i, symbol: p.symbol, resolution: p.resolution })),
+    focusPane: (i) => { if (!panes[i]) return null; focused = i; return true; },
+    paneStudies: (i) => panes[i] ? panes[i].studies.map((s) => ({ id: s.id, title: s.name })) : null,
+    removeStudyByName: (i, title, exceptId) => {
+      if (!panes[i]) return null;
+      const before = panes[i].studies.length;
+      panes[i].studies = panes[i].studies.filter((s) => !(s.name === title && s.id !== exceptId));
+      return before - panes[i].studies.length;
+    },
+  };
+}
+
+describe('bridge dispatch — panes', () => {
+  it('listPanes returns index/symbol/resolution', () => {
+    assert.deepEqual(dispatch(fakePaneInternals(), { method: 'listPanes', args: {} }),
+      { ok: true, value: [{ index: 0, symbol: 'A', resolution: '60' }, { index: 1, symbol: 'B', resolution: '5' }] });
+  });
+  it('focusPane in range', () => {
+    assert.deepEqual(dispatch(fakePaneInternals(), { method: 'focusPane', args: { pane: 1 } }), { ok: true, value: true });
+  });
+  it('focusPane out of range -> ok:false with count', () => {
+    const r = dispatch(fakePaneInternals(), { method: 'focusPane', args: { pane: 5 } });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /pane 5 out of range \(layout has 2 charts\)/);
+  });
+  it('pane.studies lists {id,title}', () => {
+    assert.deepEqual(dispatch(fakePaneInternals(), { method: 'pane.studies', args: { pane: 0 } }),
+      { ok: true, value: [{ id: 's1', title: 'RSI' }, { id: 's2', title: 'MyX' }] });
+  });
+  it('pane.removeStudyByName removes same name except the kept id', () => {
+    const int = fakePaneInternals();
+    int._panes[0].studies.push({ id: 's3', name: 'RSI' });
+    const r = dispatch(int, { method: 'pane.removeStudyByName', args: { pane: 0, title: 'RSI', exceptId: 's3' } });
+    assert.deepEqual(r, { ok: true, value: 1 });
+    assert.deepEqual(int.paneStudies(0).map((s) => s.id), ['s2', 's3']);
+  });
+});
