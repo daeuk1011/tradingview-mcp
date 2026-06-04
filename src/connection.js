@@ -6,6 +6,9 @@ const debug = createDebugLogger('cdp');
 
 let client = null;
 let targetInfo = null;
+// When set, connect() prefers this specific CDP target id over first-in-list.
+// Set by tab.switchTab() so reads/commands follow the tab the user switched to.
+let preferredTargetId = null;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -92,10 +95,29 @@ export async function connect() {
 async function findChartTarget() {
   const resp = await fetch(`${CDP_BASE_URL}/json/list`);
   const targets = await resp.json();
+  // If a specific tab was selected via switchTab, pin to it (as long as it still exists).
+  if (preferredTargetId) {
+    const preferred = targets.find(t => t.type === 'page' && t.id === preferredTargetId);
+    if (preferred) return preferred;
+    // Preferred tab is gone (closed) — fall back to default selection.
+    preferredTargetId = null;
+  }
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
     || targets.find(t => t.type === 'page' && /tradingview/i.test(t.url))
     || null;
+}
+
+/**
+ * Re-point the active CDP connection to a specific tab target id.
+ * Closes the cached client so the next getClient() reconnects to the chosen tab.
+ * Without this, switching the desktop tab leaves all reads/commands pinned to
+ * the originally-connected tab.
+ */
+export async function reconnectToTarget(targetId) {
+  preferredTargetId = targetId;
+  await disconnect();
+  return getClient();
 }
 
 export async function getTargetInfo() {

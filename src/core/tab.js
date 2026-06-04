@@ -2,7 +2,7 @@
  * Core tab management logic.
  * Controls TradingView Desktop tabs via CDP and Electron keyboard shortcuts.
  */
-import { getClient } from '../connection.js';
+import { getClient, reconnectToTarget } from '../connection.js';
 import { CDP_BASE_URL } from '../config.js';
 
 /**
@@ -93,12 +93,17 @@ export async function switchTab({ index }) {
 
   const target = tabs.tabs[idx];
 
-  // Use CDP Target.activateTarget to bring the tab to front
+  // 1) Bring the tab to the foreground in the desktop app.
   try {
-    const resp = await fetch(`${CDP_BASE_URL}/json/activate/${target.id}`);
-    const text = await resp.text();
-    return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
+    await fetch(`${CDP_BASE_URL}/json/activate/${target.id}`);
   } catch (e) {
     throw new Error(`Failed to activate tab ${idx}: ${e.message}`);
   }
+
+  // 2) Re-point the MCP's CDP connection to this tab so subsequent reads
+  //    (chart_get_state, ui_evaluate, etc.) and commands target it — not the
+  //    originally-connected tab. Without this the switch is visual-only.
+  await reconnectToTarget(target.id);
+
+  return { success: true, action: 'switched', index: idx, tab_id: target.id, chart_id: target.chart_id };
 }
