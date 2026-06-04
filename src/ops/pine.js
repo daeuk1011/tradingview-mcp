@@ -1,5 +1,6 @@
 // src/ops/pine.js
 import { resolveEditorIndex } from '../session/editor.js';
+import { resolvePaneIndex } from '../session/pane.js';
 import { callBridge } from '../bridge/inject.js';
 
 function unwrap(res) {
@@ -59,4 +60,41 @@ export async function getConsole(tab, editorRef) {
   const editor = await activate(tab, editorRef);
   const entries = unwrap(await callBridge(tab, { method: 'editor.console', args: {} }));
   return { entries, editorIndex: editor };
+}
+
+/**
+ * Apply the editor's current script to a specific pane as a study.
+ * mode 'replace' (default): after adding, remove same-titled older studies on
+ * the pane (preserving differently-named ones). mode 'add': stack.
+ * If the script fails to compile (no new study appears), skip removal and
+ * surface the console error — never delete the user's studies on failure.
+ * settleMs: how long to wait after compile for the study to appear (default
+ * 2000ms; tests pass 0).
+ * @returns {Promise<{success:boolean, applied:string|null, removed:number, paneIndex:number, editorIndex:number, error?:string}>}
+ */
+export async function applyToPane(tab, { editor, pane, mode = 'replace', settleMs = 2000 } = {}) {
+  const editorIndex = await activate(tab, editor);
+  const paneIndex = await resolvePaneIndex(tab, pane);
+  unwrap(await callBridge(tab, { method: 'focusPane', args: { pane: paneIndex } }));
+
+  const before = unwrap(await callBridge(tab, { method: 'pane.studies', args: { pane: paneIndex } }));
+  const beforeIds = new Set(before.map((s) => s.id));
+
+  unwrap(await callBridge(tab, { method: 'editor.compile', args: {} }));
+  if (settleMs) await new Promise((r) => setTimeout(r, settleMs));
+
+  const after = unwrap(await callBridge(tab, { method: 'pane.studies', args: { pane: paneIndex } }));
+  const added = after.find((s) => !beforeIds.has(s.id));
+
+  if (!added) {
+    const entries = unwrap(await callBridge(tab, { method: 'editor.console', args: {} }));
+    const err = entries.find((e) => /error/i.test(e)) || 'compile produced no new study';
+    return { success: false, applied: null, removed: 0, paneIndex, editorIndex, error: err };
+  }
+
+  let removed = 0;
+  if (mode === 'replace') {
+    removed = unwrap(await callBridge(tab, { method: 'pane.removeStudyByName', args: { pane: paneIndex, title: added.title, exceptId: added.id } }));
+  }
+  return { success: true, applied: added.title, removed, paneIndex, editorIndex };
 }
