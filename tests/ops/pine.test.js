@@ -1,7 +1,7 @@
 // tests/ops/pine.test.js
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSource, setSource, getErrors } from '../../src/ops/pine.js';
+import { getSource, setSource } from '../../src/ops/pine.js';
 
 // Fake Tab whose evaluate emulates window.__tvmcp.call() over two editors.
 function fakeTab() {
