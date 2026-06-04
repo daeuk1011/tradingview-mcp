@@ -39,18 +39,22 @@ export class Session {
     return tab;
   }
 
-  async activeTab() {
-    const pages = await this.listTabs();
+  // private: pick the active Tab from an already-fetched pages array
+  _activeFrom(pages) {
     if (pages.length === 0) throw new Error('No TradingView chart tab found. Is TradingView open with a chart?');
     const meta = pages.find((p) => p.id === this._activeTabId) || pages[0];
     this._activeTabId = meta.id;
     return this._tabFor(meta);
   }
 
+  async activeTab() {
+    return this._activeFrom(await this.listTabs());
+  }
+
   async resolveTab(ref) {
     const pages = await this.listTabs();
     const meta = resolveTabRef(ref, pages); // throws on bad ref; null => active
-    if (!meta) return this.activeTab();
+    if (!meta) return this._activeFrom(pages); // reuse already-fetched pages
     return this._tabFor(meta);
   }
 
