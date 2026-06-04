@@ -85,11 +85,13 @@ export async function closeTab() {
  */
 export async function switchTab({ index }) {
   const s = getSession();
-  const tabs = await s.listTabs();
-  const idx = Number(index);
-  if (idx >= tabs.length) {
-    throw new Error(`Tab index ${idx} out of range (have ${tabs.length} tabs)`);
-  }
-  const tab = await s.switchTab(idx);
-  return { success: true, action: 'switched', index: idx, tab_id: tab.id, chart_id: tab.chartId };
+  return s.run(async () => {
+    const tabs = await s.listTabs();
+    const idx = Number(index);
+    if (idx >= tabs.length) {
+      throw new Error(`Tab index ${idx} out of range (have ${tabs.length} tabs)`);
+    }
+    const tab = await s.switchTab(idx);
+    return { success: true, action: 'switched', index: idx, tab_id: tab.id, chart_id: tab.chartId };
+  });
 }

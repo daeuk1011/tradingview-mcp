@@ -1,7 +1,7 @@
 // tests/ops/pine.e2e.test.js
 // Requires a live TradingView with the Pine Editor open. Run manually:
 //   node --test tests/ops/pine.e2e.test.js
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getSession } from '../../src/connection.js';
 import * as pineOps from '../../src/ops/pine.js';
@@ -10,7 +10,14 @@ const LIVE = process.env.TV_E2E === '1';
 
 describe('pine ops over live bridge', { skip: !LIVE && 'set TV_E2E=1 with TradingView running' }, () => {
   let tab;
-  before(async () => { tab = await getSession().activeTab(); });
+  let original;
+  before(async () => {
+    tab = await getSession().activeTab();
+    original = (await pineOps.getSource(tab, undefined)).source;
+  });
+  after(async () => {
+    if (original !== undefined) await pineOps.setSource(tab, undefined, original);
+  });
 
   it('listEditors returns at least one editor with an index', async () => {
     const { getSource } = pineOps;

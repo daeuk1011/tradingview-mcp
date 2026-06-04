@@ -50,16 +50,6 @@ export async function evaluateAsync(expression) {
   return evaluate(expression, { awaitPromise: true });
 }
 
-/**
- * Deprecated since the Session re-points by addressing the active tab directly.
- * Kept so the interim tab_switch path still resolves; now just switches active.
- */
-export async function reconnectToTarget(targetId) {
-  const s = getSession();
-  await s.switchTab(targetId === undefined ? undefined : (s._tabs.get(targetId)?.chartId ?? targetId));
-  return getClient();
-}
-
 export async function disconnect() {
   session = null;
 }

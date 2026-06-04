@@ -5,6 +5,7 @@
  */
 import { evaluate, evaluateAsync, getClient, getSession } from '../connection.js';
 import * as pineOps from '../ops/pine.js';
+import { fmtCtx } from '../session/context.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -246,15 +247,21 @@ export async function check({ source }) {
 // ── Functions requiring TradingView connection ──
 
 export async function getSource(opts = {}) {
-  const tab = await getSession().resolveTab(opts.tab);
-  const { source, editorIndex } = await pineOps.getSource(tab, opts.editor);
-  return { success: true, source, line_count: source.split('\n').length, char_count: source.length, ctx: `tab/editor${editorIndex}` };
+  const s = getSession();
+  return s.run(async () => {
+    const tab = await s.resolveTab(opts.tab);
+    const { source, editorIndex } = await pineOps.getSource(tab, opts.editor);
+    return { success: true, source, line_count: source.split('\n').length, char_count: source.length, ctx: fmtCtx({ tab: tab.chartId, editor: editorIndex }) };
+  });
 }
 
 export async function setSource({ source, tab, editor } = {}) {
-  const t = await getSession().resolveTab(tab);
-  const { lines_set, editorIndex } = await pineOps.setSource(t, editor, source);
-  return { success: true, lines_set, ctx: `tab/editor${editorIndex}` };
+  const s = getSession();
+  return s.run(async () => {
+    const t = await s.resolveTab(tab);
+    const { lines_set, editorIndex } = await pineOps.setSource(t, editor, source);
+    return { success: true, lines_set, ctx: fmtCtx({ tab: t.chartId, editor: editorIndex }) };
+  });
 }
 
 export async function compile() {
@@ -296,9 +303,12 @@ export async function compile() {
 }
 
 export async function getErrors(opts = {}) {
-  const tab = await getSession().resolveTab(opts.tab);
-  const { errors, editorIndex } = await pineOps.getErrors(tab, opts.editor);
-  return { success: true, error_count: errors.length, errors, ctx: `tab/editor${editorIndex}` };
+  const s = getSession();
+  return s.run(async () => {
+    const tab = await s.resolveTab(opts.tab);
+    const { errors, editorIndex } = await pineOps.getErrors(tab, opts.editor);
+    return { success: true, error_count: errors.length, errors, ctx: fmtCtx({ tab: tab.chartId, editor: editorIndex }) };
+  });
 }
 
 export async function save() {
