@@ -3,7 +3,7 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
-import { evaluate, evaluateAsync, getClient, getSession } from '../connection.js';
+import { evaluate, evaluateAsync, getSession } from '../connection.js';
 import * as pineOps from '../ops/pine.js';
 import { fmtCtx } from '../session/context.js';
 
@@ -268,6 +268,10 @@ export async function compile(opts = {}) {
   const s = getSession();
   return s.run(async () => {
     const tab = await s.resolveTab(opts.tab);
+    if (opts.pane !== undefined && opts.pane !== null) {
+      const r = await pineOps.applyToPane(tab, { editor: opts.editor, pane: opts.pane, mode: opts.mode });
+      return { ...r, ctx: fmtCtx({ tab: tab.chartId, pane: r.paneIndex, editor: r.editorIndex }) };
+    }
     const { button, editorIndex } = await pineOps.compile(tab, opts.editor);
     return { success: true, button_clicked: button, ctx: fmtCtx({ tab: tab.chartId, editor: editorIndex }) };
   });
@@ -300,83 +304,10 @@ export async function getConsole(opts = {}) {
   });
 }
 
-export async function smartCompile() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const studiesBefore = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
-
-  const buttonClicked = await evaluate(`
-    (function() {
-      var btns = document.querySelectorAll('button');
-      var addBtn = null;
-      var updateBtn = null;
-      var saveBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/save and add to chart/i.test(text)) {
-          btns[i].click();
-          return 'Save and add to chart';
-        }
-        if (!addBtn && /^add to chart$/i.test(text)) addBtn = btns[i];
-        if (!updateBtn && /^update on chart$/i.test(text)) updateBtn = btns[i];
-        if (!saveBtn && btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) saveBtn = btns[i];
-      }
-      if (addBtn) { addBtn.click(); return 'Add to chart'; }
-      if (updateBtn) { updateBtn.click(); return 'Update on chart'; }
-      if (saveBtn) { saveBtn.click(); return 'Pine Save'; }
-      return null;
-    })()
-  `);
-
-  if (!buttonClicked) {
-    const c = await getClient();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
-  }
-
-  await new Promise(r => setTimeout(r, 2500));
-
-  const errors = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return [];
-      var model = m.editor.getModel();
-      if (!model) return [];
-      var markers = m.env.editor.getModelMarkers({ resource: model.uri });
-      return markers.map(function(mk) {
-        return { line: mk.startLineNumber, column: mk.startColumn, message: mk.message, severity: mk.severity };
-      });
-    })()
-  `);
-
-  const studiesAfter = await evaluate(`
-    (function() {
-      try {
-        var chart = window.TradingViewApi._activeChartWidgetWV.value();
-        if (chart && typeof chart.getAllStudies === 'function') return chart.getAllStudies().length;
-      } catch(e) {}
-      return null;
-    })()
-  `);
-
-  const studyAdded = (studiesBefore !== null && studiesAfter !== null) ? studiesAfter > studiesBefore : null;
-
-  return {
-    success: true,
-    button_clicked: buttonClicked || 'keyboard_shortcut',
-    has_errors: errors?.length > 0,
-    errors: errors || [],
-    study_added: studyAdded,
-  };
+export async function smartCompile(opts = {}) {
+  // smart_compile shares the pane-aware compile path; applyToPane (pane case)
+  // already verifies a study was added and surfaces compile errors.
+  return compile(opts);
 }
 
 export async function newScript({ type }) {
