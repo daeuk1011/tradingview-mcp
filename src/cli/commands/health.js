@@ -6,6 +6,11 @@ register('status', {
   handler: () => core.healthCheck(),
 });
 
+register('self-test', {
+  description: 'Probe known TradingView API paths and report which are alive',
+  handler: () => core.selfTest(),
+});
+
 register('launch', {
   description: 'Launch TradingView with CDP enabled',
   options: {

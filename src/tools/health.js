@@ -13,6 +13,11 @@ export function registerHealthTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
+  server.tool('tv_self_test', 'Probe all reverse-engineered TradingView internal API paths and report which are alive. Use to diagnose breakage after a TradingView update.', {}, async () => {
+    try { return jsonResult(await core.selfTest()); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
   server.tool('tv_ui_state', 'Get current UI state: which panels are open, what buttons are visible/enabled/disabled', {}, async () => {
     try { return jsonResult(await core.uiState()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }

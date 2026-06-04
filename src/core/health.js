@@ -1,7 +1,8 @@
 /**
  * Core health/discovery/launch logic.
  */
-import { getClient, getTargetInfo, evaluate } from '../connection.js';
+import { getClient, getTargetInfo, evaluate, KNOWN_PATHS } from '../connection.js';
+import { CDP_PORT } from '../config.js';
 import { existsSync } from 'fs';
 import { execSync, spawn } from 'child_process';
 
@@ -39,6 +40,36 @@ export async function healthCheck() {
     chart_resolution: state?.resolution || 'unknown',
     chart_type: state?.chartType ?? null,
     api_available: state?.apiAvailable ?? false,
+  };
+}
+
+/**
+ * Self-test: probe every reverse-engineered window.* API path in KNOWN_PATHS
+ * and report which are alive. Surfaces TradingView-update breakage in one call.
+ */
+export async function selfTest({ _deps } = {}) {
+  const evalFn = _deps?.evaluate || evaluate;
+  const checks = {};
+  for (const [name, path] of Object.entries(KNOWN_PATHS)) {
+    if (!path.startsWith('window.')) continue; // skip REST/non-window endpoints
+    let alive = false;
+    try {
+      alive = !!(await evalFn(`typeof (${path}) !== 'undefined' && (${path}) !== null`));
+    } catch {
+      alive = false;
+    }
+    checks[name] = { path, alive };
+  }
+  const names = Object.keys(checks);
+  const broken = names.filter((n) => !checks[n].alive);
+  const alive = names.length - broken.length;
+  return {
+    success: true,
+    all_healthy: names.length > 0 && broken.length === 0,
+    alive,
+    total: names.length,
+    broken,
+    paths: checks,
   };
 }
 
@@ -160,7 +191,7 @@ export async function uiState() {
 }
 
 export async function launch({ port, kill_existing } = {}) {
-  const cdpPort = port || 9222;
+  const cdpPort = port || CDP_PORT;
   const killFirst = kill_existing !== false;
   const platform = process.platform;
 

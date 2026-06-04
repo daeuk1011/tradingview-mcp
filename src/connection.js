@@ -1,9 +1,11 @@
 import CDP from 'chrome-remote-interface';
+import { CDP_HOST, CDP_PORT, CDP_BASE_URL } from './config.js';
+import { createDebugLogger } from './debug.js';
+
+const debug = createDebugLogger('cdp');
 
 let client = null;
 let targetInfo = null;
-const CDP_HOST = 'localhost';
-const CDP_PORT = 9222;
 const MAX_RETRIES = 5;
 const BASE_DELAY = 500;
 
@@ -88,7 +90,7 @@ export async function connect() {
 }
 
 async function findChartTarget() {
-  const resp = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json/list`);
+  const resp = await fetch(`${CDP_BASE_URL}/json/list`);
   const targets = await resp.json();
   // Prefer targets with tradingview.com/chart in the URL
   return targets.find(t => t.type === 'page' && /tradingview\.com\/chart/i.test(t.url))
@@ -105,6 +107,7 @@ export async function getTargetInfo() {
 
 export async function evaluate(expression, opts = {}) {
   const c = await getClient();
+  debug('evaluate', expression.length > 200 ? expression.slice(0, 200) + `…(${expression.length} chars)` : expression);
   const result = await c.Runtime.evaluate({
     expression,
     returnByValue: true,
@@ -115,6 +118,7 @@ export async function evaluate(expression, opts = {}) {
     const msg = result.exceptionDetails.exception?.description
       || result.exceptionDetails.text
       || 'Unknown evaluation error';
+    debug('evaluate FAILED:', msg);
     throw new Error(`JS evaluation error: ${msg}`);
   }
   return result.result?.value;
