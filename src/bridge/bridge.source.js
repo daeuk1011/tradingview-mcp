@@ -63,28 +63,44 @@ function INSTALL(version) {
           return { index: i, symbol: sym, resolution: res };
         });
       },
+      // Per-pane study access goes through the ACTIVE chart wrapper, which is the
+      // only object exposing clean {id,name} studies + removeEntity. We focus the
+      // target pane, wait for the activation to settle, then read/remove. Returns
+      // a Promise (the bridge `call` is async and awaits it).
       focusPane: function (i) {
         var cwc = window.TradingViewApi._chartWidgetCollection;
         var c = cwc.getAll()[i];
         if (!c) return null;
         if (c._mainDiv) c._mainDiv.click();
-        return true;
+        return new Promise(function (resolve) { setTimeout(function () { resolve(true); }, 250); });
       },
       paneStudies: function (i) {
         var cwc = window.TradingViewApi._chartWidgetCollection;
         var c = cwc.getAll()[i];
         if (!c) return null;
-        return c.getAllStudies().map(function (s) { return { id: s.id, title: s.name }; });
+        if (c._mainDiv) c._mainDiv.click();
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            var w = window.TradingViewApi._activeChartWidgetWV.value();
+            resolve(w.getAllStudies().map(function (s) { return { id: s.id, title: s.name }; }));
+          }, 250);
+        });
       },
       removeStudyByName: function (i, title, exceptId) {
         var cwc = window.TradingViewApi._chartWidgetCollection;
         var c = cwc.getAll()[i];
         if (!c) return null;
-        var removed = 0;
-        c.getAllStudies().forEach(function (s) {
-          if (s.name === title && s.id !== exceptId) { c.removeEntity(s.id); removed++; }
+        if (c._mainDiv) c._mainDiv.click();
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            var w = window.TradingViewApi._activeChartWidgetWV.value();
+            var removed = 0;
+            w.getAllStudies().forEach(function (s) {
+              if (s.name === title && s.id !== exceptId) { w.removeEntity(s.id); removed++; }
+            });
+            resolve(removed);
+          }, 250);
         });
-        return removed;
       },
     };
   }
@@ -108,7 +124,7 @@ function INSTALL(version) {
 
   window.__tvmcp = {
     version: version,
-    call: function (payload) {
+    call: async function (payload) {
       try {
         var method = payload.method, args = payload.args || {};
         switch (method) {
@@ -117,9 +133,9 @@ function INSTALL(version) {
           case 'editor.setSource': { var b = editorOr(args.editor); return b.err ? { ok: false, error: b.err } : { ok: true, value: b.acc.setSource(args.source) }; }
           case 'editor.getMarkers': { var c = editorOr(args.editor); return c.err ? { ok: false, error: c.err } : { ok: true, value: c.acc.getMarkers() }; }
           case 'listPanes': return { ok: true, value: internals().listPanes() };
-          case 'focusPane': { var fp = paneOr(args.pane); return fp.err ? { ok: false, error: fp.err } : { ok: true, value: internals().focusPane(fp.i) }; }
-          case 'pane.studies': { var ps = paneOr(args.pane); return ps.err ? { ok: false, error: ps.err } : { ok: true, value: internals().paneStudies(ps.i) }; }
-          case 'pane.removeStudyByName': { var rp = paneOr(args.pane); return rp.err ? { ok: false, error: rp.err } : { ok: true, value: internals().removeStudyByName(rp.i, args.title, args.exceptId) }; }
+          case 'focusPane': { var fp = paneOr(args.pane); return fp.err ? { ok: false, error: fp.err } : { ok: true, value: await internals().focusPane(fp.i) }; }
+          case 'pane.studies': { var ps = paneOr(args.pane); return ps.err ? { ok: false, error: ps.err } : { ok: true, value: await internals().paneStudies(ps.i) }; }
+          case 'pane.removeStudyByName': { var rp = paneOr(args.pane); return rp.err ? { ok: false, error: rp.err } : { ok: true, value: await internals().removeStudyByName(rp.i, args.title, args.exceptId) }; }
           default: return { ok: false, error: 'unknown bridge method "' + method + '"' };
         }
       } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
