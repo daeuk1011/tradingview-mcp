@@ -3,7 +3,8 @@
  * All functions accept plain options objects and return plain JS objects.
  * They throw on error (callers catch and format).
  */
-import { evaluate, evaluateAsync, getClient } from '../connection.js';
+import { evaluate, evaluateAsync, getClient, getSession } from '../connection.js';
+import * as pineOps from '../ops/pine.js';
 
 // ── Monaco finder (injected into TV page) ──
 const FIND_MONACO = `
@@ -244,41 +245,16 @@ export async function check({ source }) {
 
 // ── Functions requiring TradingView connection ──
 
-export async function getSource() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor or Monaco not found in React fiber tree.');
-
-  const source = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return null;
-      return m.editor.getValue();
-    })()
-  `);
-
-  if (source === null || source === undefined) {
-    throw new Error('Monaco editor found but getValue() returned null.');
-  }
-
-  return { success: true, source, line_count: source.split('\n').length, char_count: source.length };
+export async function getSource(opts = {}) {
+  const tab = await getSession().resolveTab(opts.tab);
+  const { source, editorIndex } = await pineOps.getSource(tab, opts.editor);
+  return { success: true, source, line_count: source.split('\n').length, char_count: source.length, ctx: `tab/editor${editorIndex}` };
 }
 
-export async function setSource({ source }) {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const escaped = JSON.stringify(source);
-  const set = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return false;
-      m.editor.setValue(${escaped});
-      return true;
-    })()
-  `);
-
-  if (!set) throw new Error('Monaco found but setValue() failed.');
-  return { success: true, lines_set: source.split('\n').length };
+export async function setSource({ source, tab, editor } = {}) {
+  const t = await getSession().resolveTab(tab);
+  const { lines_set, editorIndex } = await pineOps.setSource(t, editor, source);
+  return { success: true, lines_set, ctx: `tab/editor${editorIndex}` };
 }
 
 export async function compile() {
@@ -319,29 +295,10 @@ export async function compile() {
   return { success: true, button_clicked: clicked || 'keyboard_shortcut', source: 'dom_fallback' };
 }
 
-export async function getErrors() {
-  const editorReady = await ensurePineEditorOpen();
-  if (!editorReady) throw new Error('Could not open Pine Editor.');
-
-  const errors = await evaluate(`
-    (function() {
-      var m = ${FIND_MONACO};
-      if (!m) return [];
-      var model = m.editor.getModel();
-      if (!model) return [];
-      var markers = m.env.editor.getModelMarkers({ resource: model.uri });
-      return markers.map(function(mk) {
-        return { line: mk.startLineNumber, column: mk.startColumn, message: mk.message, severity: mk.severity };
-      });
-    })()
-  `);
-
-  return {
-    success: true,
-    has_errors: errors?.length > 0,
-    error_count: errors?.length || 0,
-    errors: errors || [],
-  };
+export async function getErrors(opts = {}) {
+  const tab = await getSession().resolveTab(opts.tab);
+  const { errors, editorIndex } = await pineOps.getErrors(tab, opts.editor);
+  return { success: true, error_count: errors.length, errors, ctx: `tab/editor${editorIndex}` };
 }
 
 export async function save() {
