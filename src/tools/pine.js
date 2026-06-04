@@ -19,8 +19,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_compile', 'Compile / add the current Pine Script to the chart', {}, async () => {
-    try { return jsonResult(await core.compile()); }
+  server.tool('pine_compile', 'Compile / add the current Pine Script to the chart (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.compile({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -31,13 +33,17 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_save', 'Save the current Pine Script (Ctrl+S)', {}, async () => {
-    try { return jsonResult(await core.save()); }
+  server.tool('pine_save', 'Save the current Pine Script (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.save({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_get_console', 'Read Pine Script console/log output (compile messages, log.info(), errors)', {}, async () => {
-    try { return jsonResult(await core.getConsole()); }
+  server.tool('pine_get_console', 'Read Pine Script console/log output (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.getConsole({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
