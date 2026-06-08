@@ -117,47 +117,98 @@ export async function layoutList() {
   return { success: true, layout_count: layouts?.layouts?.length || 0, source: layouts?.source, layouts: layouts?.layouts || [], error: layouts?.error };
 }
 
-export async function layoutSwitch({ name }) {
-  const escaped = JSON.stringify(name);
-  const result = await evaluateAsync(`
+export async function layoutSwitch({ name, _deps } = {}) {
+  const _evaluate = _deps?.evaluate || evaluate;
+  const _evaluateAsync = _deps?.evaluateAsync || evaluateAsync;
+  const sleep = _deps?.sleep || ((ms) => new Promise(r => setTimeout(r, ms)));
+
+  // 1. Resolve the saved-chart record so we get its `url` (the short id the
+  //    loader actually wants). Match by exact name, case-insensitive name,
+  //    substring, or numeric record id. getSavedCharts() ids (e.g. 191941061)
+  //    are NOT the loadable id — `url` (e.g. "L6kity6U") is.
+  const escaped = JSON.stringify(String(name));
+  const match = await _evaluateAsync(`
     new Promise(function(resolve) {
       try {
         var target = ${escaped};
-        if (/^\\d+$/.test(target)) { window.TradingViewApi.loadChartFromServer(target); resolve({success: true, method: 'loadChartFromServer', id: target, source: 'internal_api'}); return; }
+        var t = target.toLowerCase();
         window.TradingViewApi.getSavedCharts(function(charts) {
-          if (!charts || !Array.isArray(charts)) { resolve({success: false, error: 'getSavedCharts returned no data', source: 'internal_api'}); return; }
-          var match = null;
-          for (var i = 0; i < charts.length; i++) { var cname = charts[i].name || charts[i].title || ''; if (cname === target || cname.toLowerCase() === target.toLowerCase()) { match = charts[i]; break; } }
-          if (!match) { for (var j = 0; j < charts.length; j++) { var cn = (charts[j].name || charts[j].title || '').toLowerCase(); if (cn.indexOf(target.toLowerCase()) !== -1) { match = charts[j]; break; } } }
-          if (!match) { resolve({success: false, error: 'Layout "' + target + '" not found.', source: 'internal_api'}); return; }
-          var chartId = match.id || match.chartId;
-          window.TradingViewApi.loadChartFromServer(chartId);
-          resolve({success: true, method: 'loadChartFromServer', id: chartId, name: match.name || match.title, source: 'internal_api'});
+          if (!charts || !Array.isArray(charts) || !charts.length) { resolve({ error: 'getSavedCharts returned no data' }); return; }
+          var byId = null, exact = null, partial = null;
+          for (var i = 0; i < charts.length; i++) {
+            var c = charts[i];
+            var nm = (c.name || c.title || '');
+            if (byId === null && String(c.id) === target) byId = c;
+            if (exact === null && (nm === target || nm.toLowerCase() === t)) exact = c;
+            if (partial === null && nm.toLowerCase().indexOf(t) !== -1) partial = c;
+          }
+          var m = byId || exact || partial;
+          if (!m) { resolve({ error: 'Layout "' + target + '" not found.' }); return; }
+          resolve({ url: m.url || m.image_url || null, id: m.id || null, name: m.name || m.title || target, symbol: m.symbol || null, resolution: m.resolution || null });
         });
-        setTimeout(function() { resolve({success: false, error: 'getSavedCharts timed out', source: 'internal_api'}); }, 5000);
-      } catch(e) { resolve({success: false, error: e.message, source: 'internal_api'}); }
+        setTimeout(function() { resolve({ error: 'getSavedCharts timed out' }); }, 5000);
+      } catch(e) { resolve({ error: e.message }); }
     })
   `);
-  if (!result?.success) throw new Error(result?.error || 'Unknown error switching layout');
+  if (match?.error) throw new Error(match.error);
+  if (!match?.url) throw new Error('Layout "' + name + '" found but has no loadable url id.');
 
-  // Handle "unsaved changes" confirmation dialog
-  await new Promise(r => setTimeout(r, 500));
-  const dismissed = await evaluate(`
+  // 2. Trigger the load. loadLayoutFromServerByLayoutId(url) -> loadChartByUrl;
+  //    loadChartFromServer(id) expects a chart descriptor and silently no-ops
+  //    on a bare id (the old bug).
+  const urlEsc = JSON.stringify(match.url);
+  const loaded = await _evaluateAsync(`
+    new Promise(function(resolve) {
+      try { window.TradingViewApi.loadLayoutFromServerByLayoutId(${urlEsc}); }
+      catch(e) { resolve({ error: e.message }); return; }
+      setTimeout(function() { resolve({ ok: true }); }, 300);
+    })
+  `);
+  if (loaded?.error) throw new Error(loaded.error);
+
+  // 3. Dismiss the "unsaved changes" confirmation if it appears (EN + KO).
+  await sleep(400);
+  const dismissed = await _evaluate(`
     (function() {
       var btns = document.querySelectorAll('button');
       for (var i = 0; i < btns.length; i++) {
-        var text = btns[i].textContent.trim();
-        if (/open anyway|don't save|discard/i.test(text)) {
-          btns[i].click();
-          return true;
-        }
+        var text = (btns[i].textContent || '').trim();
+        if (/open anyway|don't save|discard|저장 안 함|저장하지|무시|그래도 열기/i.test(text)) { btns[i].click(); return true; }
       }
       return false;
     })()
   `);
+  if (dismissed) await sleep(600);
 
-  if (dismissed) await new Promise(r => setTimeout(r, 1000));
-  return { success: true, layout: result.name || name, layout_id: result.id, source: result.source, action: 'switched', unsaved_dialog_dismissed: dismissed };
+  // 4. Verify the switch actually landed — don't report success optimistically.
+  let current = null, verified = false;
+  for (let i = 0; i < 12; i++) {
+    current = await _evaluate(`
+      (function() {
+        var api = window.TradingViewApi;
+        var c = api._activeChartWidgetWV.value();
+        return { layoutName: api.layoutName(), symbol: c.symbol(), resolution: c.resolution() };
+      })()
+    `);
+    if (current && current.layoutName === match.name) { verified = true; break; }
+    await sleep(300);
+  }
+  if (!verified) {
+    throw new Error('Layout switch to "' + match.name + '" did not take effect (still on "' + (current?.layoutName ?? 'unknown') + '").');
+  }
+
+  return {
+    success: true,
+    layout: match.name,
+    layout_url: match.url,
+    layout_id: match.id,
+    symbol: current?.symbol,
+    resolution: current?.resolution,
+    source: 'internal_api',
+    action: 'switched',
+    verified: true,
+    unsaved_dialog_dismissed: dismissed,
+  };
 }
 
 export async function keyboard({ key, modifiers }) {
