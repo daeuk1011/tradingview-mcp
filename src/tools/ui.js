@@ -29,7 +29,7 @@ export function registerUiTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('layout_switch', 'Switch to a saved chart layout by name or ID', {
+  server.tool('layout_switch', 'Switch to a saved chart layout by name or ID. Verifies the switch actually landed (errors if it did not).', {
     name: z.string().describe('Name or ID of the layout to switch to'),
   }, async ({ name }) => {
     try { return jsonResult(await core.layoutSwitch({ name })); }
