@@ -132,13 +132,6 @@ function INSTALL(version) {
     }
     return null;
   }
-  function clickSave() {
-    var btns = Array.prototype.slice.call(document.querySelectorAll('button'));
-    for (var i = 0; i < btns.length; i++) {
-      if (btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) { realClick(btns[i]); return true; }
-    }
-    return false;
-  }
   // Focus the Pine editor's text input so a CDP Cmd/Ctrl+S save lands there.
   function focusEditorInput() {
     var m = document.querySelector('.monaco-editor.pine-editor-monaco');
@@ -187,7 +180,6 @@ function INSTALL(version) {
           case 'editor.activate': { var ea = editorOr(args.editor); return ea.err ? { ok: false, error: ea.err } : { ok: true, value: ea.acc.activate() }; }
           case 'editor.focusInput': return { ok: true, value: focusEditorInput() };
           case 'editor.compile': return { ok: true, value: clickCompile() };
-          case 'editor.save': return { ok: true, value: clickSave() };
           case 'editor.console': return { ok: true, value: readConsole() };
           default: return { ok: false, error: 'unknown bridge method "' + method + '"' };
         }

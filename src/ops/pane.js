@@ -1,3 +1,6 @@
+// Pane-data primitives (bridge-backed). Validated working but not yet exposed
+// via a dedicated MCP tool — retained as infrastructure for a future
+// multi-editor / pane-aware feature. No current tool/CLI consumer.
 import { resolvePaneIndex } from '../session/pane.js';
 import { callBridge } from '../bridge/inject.js';
 
