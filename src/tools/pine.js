@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import { tabParam, editorParam, paneParam, modeParam } from './_context.js';
+import { tabParam, editorParam } from './_context.js';
 import * as core from '../core/pine.js';
 
 export function registerPineTools(server) {
@@ -19,10 +19,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_compile', 'Compile the Pine Script; optionally target a specific tab/editor and apply to a pane', {
-    tab: tabParam, editor: editorParam, pane: paneParam, mode: modeParam,
-  }, async ({ tab, editor, pane, mode }) => {
-    try { return jsonResult(await core.compile({ tab, editor, pane, mode })); }
+  server.tool('pine_compile', 'Compile / add the current Pine Script to the active chart (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.compile({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
@@ -47,10 +47,10 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_smart_compile', 'Compile + report; optionally target a specific tab/editor and apply to a pane', {
-    tab: tabParam, editor: editorParam, pane: paneParam, mode: modeParam,
-  }, async ({ tab, editor, pane, mode }) => {
-    try { return jsonResult(await core.smartCompile({ tab, editor, pane, mode })); }
+  server.tool('pine_smart_compile', 'Compile + add to the active chart (optionally a specific tab/editor)', {
+    tab: tabParam, editor: editorParam,
+  }, async ({ tab, editor }) => {
+    try { return jsonResult(await core.smartCompile({ tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

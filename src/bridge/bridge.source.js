@@ -1,5 +1,5 @@
 // src/bridge/bridge.source.js
-export const BRIDGE_VERSION = 2;
+export const BRIDGE_VERSION = 3;
 
 // The body installs window.__tvmcp. Authored as a normal function so it stays
 // readable/lintable; we inject `fn.toString()` wrapped in an IIFE.
@@ -113,23 +113,37 @@ function INSTALL(version) {
     };
   }
 
+  // Fire a real pointer/mouse sequence — these toolbar buttons are React
+  // components that ignore a bare .click().
+  function realClick(el) {
+    ['pointerdown', 'mousedown', 'mouseup', 'click', 'pointerup'].forEach(function (ev) {
+      try { el.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+    });
+  }
+  // The "add to chart" control matched by title OR text, locale-aware (the
+  // button has no data-name/aria-label; in a Korean UI its title is "차트에 넣기").
+  var ADD_RE = /save and add to chart|add to chart|update on chart|차트에 넣기|차트에 추가|차트에 적용/i;
   function clickCompile() {
-    var btns = document.querySelectorAll('button');
+    var btns = Array.prototype.slice.call(document.querySelectorAll('button, [role="button"]'));
     for (var i = 0; i < btns.length; i++) {
-      var t = btns[i].textContent.trim();
-      if (/save and add to chart/i.test(t)) { btns[i].click(); return 'Save and add to chart'; }
-    }
-    for (var j = 0; j < btns.length; j++) {
-      var t2 = btns[j].textContent.trim();
-      if (/^(add to chart|update on chart)$/i.test(t2)) { btns[j].click(); return t2; }
+      var b = btns[i];
+      var label = (b.getAttribute('title') || '') + ' ' + (b.textContent || '');
+      if (ADD_RE.test(label) && b.offsetParent !== null) { realClick(b); return (b.getAttribute('title') || b.textContent || 'add to chart').trim().slice(0, 30); }
     }
     return null;
   }
   function clickSave() {
-    var btns = document.querySelectorAll('button');
+    var btns = Array.prototype.slice.call(document.querySelectorAll('button'));
     for (var i = 0; i < btns.length; i++) {
-      if (btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) { btns[i].click(); return true; }
+      if (btns[i].className.indexOf('saveButton') !== -1 && btns[i].offsetParent !== null) { realClick(btns[i]); return true; }
     }
+    return false;
+  }
+  // Focus the Pine editor's text input so a CDP Cmd/Ctrl+S save lands there.
+  function focusEditorInput() {
+    var m = document.querySelector('.monaco-editor.pine-editor-monaco');
+    var t = m && m.querySelector('textarea');
+    if (t) { t.focus(); return true; }
     return false;
   }
   function readConsole() {
@@ -171,6 +185,7 @@ function INSTALL(version) {
           case 'pane.studies': { var ps = paneOr(args.pane); return ps.err ? { ok: false, error: ps.err } : { ok: true, value: await internals().paneStudies(ps.i) }; }
           case 'pane.removeStudyByName': { var rp = paneOr(args.pane); return rp.err ? { ok: false, error: rp.err } : { ok: true, value: await internals().removeStudyByName(rp.i, args.title, args.exceptId) }; }
           case 'editor.activate': { var ea = editorOr(args.editor); return ea.err ? { ok: false, error: ea.err } : { ok: true, value: ea.acc.activate() }; }
+          case 'editor.focusInput': return { ok: true, value: focusEditorInput() };
           case 'editor.compile': return { ok: true, value: clickCompile() };
           case 'editor.save': return { ok: true, value: clickSave() };
           case 'editor.console': return { ok: true, value: readConsole() };

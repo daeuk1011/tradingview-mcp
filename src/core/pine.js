@@ -268,10 +268,6 @@ export async function compile(opts = {}) {
   const s = getSession();
   return s.run(async () => {
     const tab = await s.resolveTab(opts.tab);
-    if (opts.pane !== undefined && opts.pane !== null) {
-      const r = await pineOps.applyToPane(tab, { editor: opts.editor, pane: opts.pane, mode: opts.mode });
-      return { ...r, ctx: fmtCtx({ tab: tab.chartId, pane: r.paneIndex, editor: r.editorIndex }) };
-    }
     const { button, editorIndex } = await pineOps.compile(tab, opts.editor);
     return { success: true, button_clicked: button, ctx: fmtCtx({ tab: tab.chartId, editor: editorIndex }) };
   });
@@ -305,8 +301,7 @@ export async function getConsole(opts = {}) {
 }
 
 export async function smartCompile(opts = {}) {
-  // smart_compile shares the pane-aware compile path; applyToPane (pane case)
-  // already verifies a study was added and surfaces compile errors.
+  // Same save-first compile path; compiles the active editor onto the active chart.
   return compile(opts);
 }
 

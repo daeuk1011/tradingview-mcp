@@ -1,6 +1,5 @@
 // src/ops/pine.js
 import { resolveEditorIndex } from '../session/editor.js';
-import { resolvePaneIndex } from '../session/pane.js';
 import { callBridge } from '../bridge/inject.js';
 
 function unwrap(res) {
@@ -35,33 +34,33 @@ async function activate(tab, editorRef) {
   return editor;
 }
 
-/**
- * Trigger compilation on the currently-active editor: click "Save and add to
- * chart", falling back to the CDP Ctrl+Enter shortcut if no button is found.
- * @returns {Promise<string>} the button label or 'keyboard_shortcut'.
- */
-async function triggerCompile(tab) {
-  let button = unwrap(await callBridge(tab, { method: 'editor.compile', args: {} }));
-  if (!button) {
-    const c = await tab.client();
-    await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await c.Input.dispatchKeyEvent({ type: 'keyUp', key: 'Enter', code: 'Enter' });
-    button = 'keyboard_shortcut';
-  }
-  return button;
+// Validated live: TradingView's "add to chart" only applies the SAVED/compiled
+// script, so we must save (Cmd/Ctrl+S) first and wait for it to compile, then
+// click the (locale-dependent) "add to chart" toolbar button.
+const SAVE_MS = 2500;
+
+/** Focus the editor input and save via CDP Cmd/Ctrl+S; waits saveMs for compile. */
+async function saveEditor(tab, saveMs) {
+  unwrap(await callBridge(tab, { method: 'editor.focusInput', args: {} }));
+  const c = await tab.client();
+  const mod = process.platform === 'darwin' ? 4 : 2; // Meta on macOS, Ctrl elsewhere
+  await c.Input.dispatchKeyEvent({ type: 'keyDown', modifiers: mod, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
+  await c.Input.dispatchKeyEvent({ type: 'keyUp', modifiers: mod, key: 's', code: 'KeyS', windowsVirtualKeyCode: 83 });
+  if (saveMs) await new Promise((r) => setTimeout(r, saveMs));
 }
 
 /** @returns {Promise<{success:true, button:string, editorIndex:number}>} */
-export async function compile(tab, editorRef) {
+export async function compile(tab, editorRef, { saveMs = SAVE_MS } = {}) {
   const editor = await activate(tab, editorRef);
-  const button = await triggerCompile(tab);
-  return { success: true, button, editorIndex: editor };
+  await saveEditor(tab, saveMs);
+  const button = unwrap(await callBridge(tab, { method: 'editor.compile', args: {} }));
+  return { success: true, button: button || 'add-to-chart', editorIndex: editor };
 }
 
 /** @returns {Promise<{success:true, editorIndex:number}>} */
-export async function save(tab, editorRef) {
+export async function save(tab, editorRef, { saveMs = SAVE_MS } = {}) {
   const editor = await activate(tab, editorRef);
-  unwrap(await callBridge(tab, { method: 'editor.save', args: {} }));
+  await saveEditor(tab, saveMs);
   return { success: true, editorIndex: editor };
 }
 
@@ -72,39 +71,3 @@ export async function getConsole(tab, editorRef) {
   return { entries, editorIndex: editor };
 }
 
-/**
- * Apply the editor's current script to a specific pane as a study.
- * mode 'replace' (default): after adding, remove same-titled older studies on
- * the pane (preserving differently-named ones). mode 'add': stack.
- * If the script fails to compile (no new study appears), skip removal and
- * surface the console error — never delete the user's studies on failure.
- * settleMs: how long to wait after compile for the study to appear (default
- * 2000ms; tests pass 0).
- * @returns {Promise<{success:boolean, applied:string|null, removed:number, paneIndex:number, editorIndex:number, error?:string}>}
- */
-export async function applyToPane(tab, { editor, pane, mode = 'replace', settleMs = 2000 } = {}) {
-  const editorIndex = await activate(tab, editor);
-  const paneIndex = await resolvePaneIndex(tab, pane);
-  unwrap(await callBridge(tab, { method: 'focusPane', args: { pane: paneIndex } }));
-
-  const before = unwrap(await callBridge(tab, { method: 'pane.studies', args: { pane: paneIndex } }));
-  const beforeIds = new Set(before.map((s) => s.id));
-
-  await triggerCompile(tab);
-  if (settleMs) await new Promise((r) => setTimeout(r, settleMs));
-
-  const after = unwrap(await callBridge(tab, { method: 'pane.studies', args: { pane: paneIndex } }));
-  const added = after.find((s) => !beforeIds.has(s.id));
-
-  if (!added) {
-    const entries = unwrap(await callBridge(tab, { method: 'editor.console', args: {} }));
-    const err = entries.find((e) => /error/i.test(e)) || 'compile produced no new study';
-    return { success: false, applied: null, removed: 0, paneIndex, editorIndex, error: err };
-  }
-
-  let removed = 0;
-  if (mode === 'replace') {
-    removed = unwrap(await callBridge(tab, { method: 'pane.removeStudyByName', args: { pane: paneIndex, title: added.title, exceptId: added.id } }));
-  }
-  return { success: true, applied: added.title, removed, paneIndex, editorIndex };
-}
