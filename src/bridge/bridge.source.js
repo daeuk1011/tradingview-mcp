@@ -1,5 +1,5 @@
 // src/bridge/bridge.source.js
-export const BRIDGE_VERSION = 1;
+export const BRIDGE_VERSION = 3;
 
 // The body installs window.__tvmcp. Authored as a normal function so it stays
 // readable/lintable; we inject `fn.toString()` wrapped in an IIFE.
@@ -53,9 +53,106 @@ function INSTALL(version) {
               return { message: m.message, line: m.startLineNumber, severity: m.severity };
             });
           },
+          activate: function () {
+            try { ed.focus(); } catch (e) {}
+            try {
+              var tabs = document.querySelectorAll('[class*="scriptTab"], [class*="editorTab"]');
+              if (tabs[i]) tabs[i].click();
+            } catch (e) {}
+            return true;
+          },
         };
       },
+      listPanes: function () {
+        var cwc = window.TradingViewApi._chartWidgetCollection;
+        return cwc.getAll().map(function (c, i) {
+          var sym = '', res = null;
+          try { var ms = c.model().mainSeries(); sym = ms.symbol(); res = ms.interval(); } catch (e) {}
+          return { index: i, symbol: sym, resolution: res };
+        });
+      },
+      // Per-pane study access goes through the ACTIVE chart wrapper, which is the
+      // only object exposing clean {id,name} studies + removeEntity. We focus the
+      // target pane, wait for the activation to settle, then read/remove. Returns
+      // a Promise (the bridge `call` is async and awaits it).
+      focusPane: function (i) {
+        var cwc = window.TradingViewApi._chartWidgetCollection;
+        var c = cwc.getAll()[i];
+        if (!c) return null;
+        if (c._mainDiv) c._mainDiv.click();
+        return new Promise(function (resolve) { setTimeout(function () { resolve(true); }, 250); });
+      },
+      paneStudies: function (i) {
+        var cwc = window.TradingViewApi._chartWidgetCollection;
+        var c = cwc.getAll()[i];
+        if (!c) return null;
+        if (c._mainDiv) c._mainDiv.click();
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            var w = window.TradingViewApi._activeChartWidgetWV.value();
+            resolve(w.getAllStudies().map(function (s) { return { id: s.id, title: s.name }; }));
+          }, 250);
+        });
+      },
+      removeStudyByName: function (i, title, exceptId) {
+        var cwc = window.TradingViewApi._chartWidgetCollection;
+        var c = cwc.getAll()[i];
+        if (!c) return null;
+        if (c._mainDiv) c._mainDiv.click();
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            var w = window.TradingViewApi._activeChartWidgetWV.value();
+            var removed = 0;
+            w.getAllStudies().forEach(function (s) {
+              if (s.name === title && s.id !== exceptId) { w.removeEntity(s.id); removed++; }
+            });
+            resolve(removed);
+          }, 250);
+        });
+      },
     };
+  }
+
+  // Fire a real pointer/mouse sequence — these toolbar buttons are React
+  // components that ignore a bare .click().
+  function realClick(el) {
+    ['pointerdown', 'mousedown', 'mouseup', 'click', 'pointerup'].forEach(function (ev) {
+      try { el.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+    });
+  }
+  // The "add to chart" control matched by title OR text, locale-aware (the
+  // button has no data-name/aria-label; in a Korean UI its title is "차트에 넣기").
+  var ADD_RE = /save and add to chart|add to chart|update on chart|차트에 넣기|차트에 추가|차트에 적용/i;
+  function clickCompile() {
+    var btns = Array.prototype.slice.call(document.querySelectorAll('button, [role="button"]'));
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      var label = (b.getAttribute('title') || '') + ' ' + (b.textContent || '');
+      if (ADD_RE.test(label) && b.offsetParent !== null) { realClick(b); return (b.getAttribute('title') || b.textContent || 'add to chart').trim().slice(0, 30); }
+    }
+    return null;
+  }
+  // Focus the Pine editor's text input so a CDP Cmd/Ctrl+S save lands there.
+  function focusEditorInput() {
+    var m = document.querySelector('.monaco-editor.pine-editor-monaco');
+    var t = m && m.querySelector('textarea');
+    if (t) { t.focus(); return true; }
+    return false;
+  }
+  function readConsole() {
+    var out = [];
+    var rows = document.querySelectorAll('[class*="consoleRow"], [class*="consoleLine"]');
+    for (var i = 0; i < rows.length; i++) { var x = rows[i].textContent.trim(); if (x) out.push(x); }
+    return out;
+  }
+
+  function paneOr(ref) {
+    var panes = internals().listPanes();
+    var i = Number(ref);
+    if (!Number.isInteger(i) || i < 0 || i >= panes.length) {
+      return { err: 'pane ' + ref + ' out of range (layout has ' + panes.length + ' chart' + (panes.length === 1 ? '' : 's') + ')' };
+    }
+    return { i: i };
   }
 
   function editorOr(ref) {
@@ -68,7 +165,7 @@ function INSTALL(version) {
 
   window.__tvmcp = {
     version: version,
-    call: function (payload) {
+    call: async function (payload) {
       try {
         var method = payload.method, args = payload.args || {};
         switch (method) {
@@ -76,6 +173,14 @@ function INSTALL(version) {
           case 'editor.getSource': { var a = editorOr(args.editor); return a.err ? { ok: false, error: a.err } : { ok: true, value: a.acc.getSource() }; }
           case 'editor.setSource': { var b = editorOr(args.editor); return b.err ? { ok: false, error: b.err } : { ok: true, value: b.acc.setSource(args.source) }; }
           case 'editor.getMarkers': { var c = editorOr(args.editor); return c.err ? { ok: false, error: c.err } : { ok: true, value: c.acc.getMarkers() }; }
+          case 'listPanes': return { ok: true, value: internals().listPanes() };
+          case 'focusPane': { var fp = paneOr(args.pane); return fp.err ? { ok: false, error: fp.err } : { ok: true, value: await internals().focusPane(fp.i) }; }
+          case 'pane.studies': { var ps = paneOr(args.pane); return ps.err ? { ok: false, error: ps.err } : { ok: true, value: await internals().paneStudies(ps.i) }; }
+          case 'pane.removeStudyByName': { var rp = paneOr(args.pane); return rp.err ? { ok: false, error: rp.err } : { ok: true, value: await internals().removeStudyByName(rp.i, args.title, args.exceptId) }; }
+          case 'editor.activate': { var ea = editorOr(args.editor); return ea.err ? { ok: false, error: ea.err } : { ok: true, value: ea.acc.activate() }; }
+          case 'editor.focusInput': return { ok: true, value: focusEditorInput() };
+          case 'editor.compile': return { ok: true, value: clickCompile() };
+          case 'editor.console': return { ok: true, value: readConsole() };
           default: return { ok: false, error: 'unknown bridge method "' + method + '"' };
         }
       } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }

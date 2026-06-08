@@ -2,6 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { getSource, setSource } from '../../src/ops/pine.js';
+import { compile, save, getConsole } from '../../src/ops/pine.js';
 
 // Fake Tab whose evaluate emulates window.__tvmcp.call() over two editors.
 function fakeTab() {
@@ -39,3 +40,45 @@ describe('ops/pine', () => {
     await assert.rejects(getSource(fakeTab(), 'X'), /no Pine editor named "X" \(open: 0=내전략, 1=무제\)/);
   });
 });
+
+function fakeCompileTab({ compileReturns = 'Save and add to chart' } = {}) {
+  const calls = [];
+  return {
+    calls,
+    async evaluate(expr) {
+      if (expr.includes('version')) return 2;
+      const m = expr.match(/__tvmcp\.call\((.*)\)$/s);
+      if (!m) throw new Error('unexpected ' + expr);
+      const { method } = JSON.parse(m[1]);
+      calls.push(method);
+      if (method === 'listEditors') return { ok: true, value: [{ index: 0, name: 'a' }] };
+      if (method === 'editor.activate') return { ok: true, value: true };
+      if (method === 'editor.focusInput') return { ok: true, value: true };
+      if (method === 'editor.compile') return { ok: true, value: compileReturns };
+      if (method === 'editor.console') return { ok: true, value: ['12:00:00 compiled'] };
+      return { ok: false, error: 'unknown' };
+    },
+    async client() { return { Input: { dispatchKeyEvent: async () => {} } }; },
+  };
+}
+
+describe('ops/pine compile/save/console', () => {
+  it('compile activates, saves, then clicks add-to-chart', async () => {
+    const tab = fakeCompileTab();
+    const r = await compile(tab, 0, { saveMs: 0 });
+    assert.equal(r.button, 'Save and add to chart');
+    assert.deepEqual(tab.calls, ['listEditors', 'editor.activate', 'editor.focusInput', 'editor.compile']);
+  });
+  it('compile returns a default label when the button label is empty', async () => {
+    const tab = fakeCompileTab({ compileReturns: null });
+    const r = await compile(tab, 0, { saveMs: 0 });
+    assert.equal(r.button, 'add-to-chart');
+  });
+  it('save activates then saves', async () => {
+    assert.equal((await save(fakeCompileTab(), 0, { saveMs: 0 })).success, true);
+  });
+  it('getConsole returns entries', async () => {
+    assert.deepEqual((await getConsole(fakeCompileTab(), 0)).entries, ['12:00:00 compiled']);
+  });
+});
+
