@@ -64,6 +64,27 @@ export async function save(tab, editorRef, { saveMs = SAVE_MS } = {}) {
   return { success: true, editorIndex: editor };
 }
 
+/**
+ * Save the current editor's script as a NEW copy named `name` (non-destructive —
+ * uses TradingView's native "Make a copy", which allocates a fresh script id).
+ * @returns {Promise<{success:true, name:string, editorIndex:number}>}
+ */
+export async function makeCopy(tab, editorRef, { name }) {
+  const editor = await activate(tab, editorRef);
+  const res = unwrap(await callBridge(tab, { method: 'editor.makeCopy', args: { name } }));
+  return { success: true, name: name ?? res ?? null, editorIndex: editor };
+}
+
+/**
+ * Create a fresh blank script of `type` in its own slot via native "Create new".
+ * @returns {Promise<{success:true, type:string, editorIndex:number}>}
+ */
+export async function createNew(tab, editorRef, { type }) {
+  const editor = await activate(tab, editorRef);
+  unwrap(await callBridge(tab, { method: 'editor.createNew', args: { type } }));
+  return { success: true, type, editorIndex: editor };
+}
+
 /** @returns {Promise<{entries:string[], editorIndex:number}>} */
 export async function getConsole(tab, editorRef) {
   const editor = await activate(tab, editorRef);

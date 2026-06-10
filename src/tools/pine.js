@@ -54,10 +54,26 @@ export function registerPineTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('pine_new', 'Create a new blank Pine Script', {
+  server.tool('pine_new', 'Replace the editor buffer with a blank template. WARNING: this does NOT create a new saved script — a subsequent pine_save/pine_smart_compile OVERWRITES the script currently loaded in the editor. To create a separate saved script non-destructively, use pine_create (blank) or pine_save_as (copy of current).', {
     type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
   }, async ({ type }) => {
     try { return jsonResult(await core.newScript({ type })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_create', 'Create a fresh blank Pine Script in its OWN saved slot (non-destructive — uses TradingView\'s native "Create new", so it never overwrites the currently-loaded script).', {
+    type: z.enum(['indicator', 'strategy', 'library']).describe('Type of script to create'),
+    tab: tabParam, editor: editorParam,
+  }, async ({ type, tab, editor }) => {
+    try { return jsonResult(await core.createNewScript({ type, tab, editor })); }
+    catch (err) { return jsonResult({ success: false, error: err.message }, true); }
+  });
+
+  server.tool('pine_save_as', 'Save the current editor script as a NEW named copy WITHOUT overwriting it (native "Make a copy" → rename). Use this to keep an existing script intact while saving a variant — e.g. saving a visualization indicator without clobbering a strategy.', {
+    name: z.string().describe('Name for the new copy'),
+    tab: tabParam, editor: editorParam,
+  }, async ({ name, tab, editor }) => {
+    try { return jsonResult(await core.saveAs({ name, tab, editor })); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

@@ -300,6 +300,40 @@ export async function getConsole(opts = {}) {
   });
 }
 
+/**
+ * Save the current editor's script as a NEW named copy WITHOUT overwriting it.
+ * Drives TradingView's native "Make a copy", so a fresh script id is allocated.
+ * This is the non-destructive alternative to pine_save (which overwrites the
+ * currently-loaded script).
+ */
+export async function saveAs({ name, tab: tabRef, editor } = {}) {
+  if (!name || !String(name).trim()) throw new Error('saveAs requires a non-empty name.');
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const s = getSession();
+  return s.run(async () => {
+    const tab = await s.resolveTab(tabRef);
+    const { name: saved, editorIndex } = await pineOps.makeCopy(tab, editor, { name: String(name).trim() });
+    return { success: true, action: 'saved_as', name: saved, ctx: fmtCtx({ tab: tab.chartId, editor: editorIndex }) };
+  });
+}
+
+/**
+ * Create a fresh blank script of `type` in its OWN slot via native "Create new"
+ * — non-destructive, unlike newScript() which only swaps the editor buffer and
+ * lets the next save overwrite the previously-loaded script.
+ */
+export async function createNewScript({ type = 'indicator', tab: tabRef, editor } = {}) {
+  const editorReady = await ensurePineEditorOpen();
+  if (!editorReady) throw new Error('Could not open Pine Editor.');
+  const s = getSession();
+  return s.run(async () => {
+    const tab = await s.resolveTab(tabRef);
+    const { type: t, editorIndex } = await pineOps.createNew(tab, editor, { type });
+    return { success: true, action: 'new_script_created', type: t, ctx: fmtCtx({ tab: tab.chartId, editor: editorIndex }) };
+  });
+}
+
 export async function smartCompile(opts = {}) {
   // Same save-first compile path; compiles the active editor onto the active chart.
   return compile(opts);
