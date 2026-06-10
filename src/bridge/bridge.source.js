@@ -1,9 +1,13 @@
 // src/bridge/bridge.source.js
-export const BRIDGE_VERSION = 3;
+import { LOCALE } from './locale.js';
+
+export const BRIDGE_VERSION = 5;
 
 // The body installs window.__tvmcp. Authored as a normal function so it stays
-// readable/lintable; we inject `fn.toString()` wrapped in an IIFE.
-function INSTALL(version) {
+// readable/lintable; we inject `fn.toString()` wrapped in an IIFE. `L` carries
+// the locale label patterns (see locale.js) — injected as JSON so it survives
+// the toString() round-trip.
+function INSTALL(version, L) {
   function resolveMonaco() {
     var container = document.querySelector('.monaco-editor.pine-editor-monaco');
     if (!container) return null;
@@ -120,9 +124,103 @@ function INSTALL(version) {
       try { el.dispatchEvent(new MouseEvent(ev, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
     });
   }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  // First VISIBLE node under `root` whose aria-label/text matches `re`.
+  function findLabel(re, root, sel) {
+    var scope = root || document;
+    var nodes = scope.querySelectorAll(sel || 'button, [role="menuitem"], [role="button"], [aria-label]');
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.offsetParent === null) continue;
+      var label = ((n.getAttribute('aria-label') || '') + ' ' + (n.textContent || '')).trim();
+      if (re.test(label)) return n;
+    }
+    return null;
+  }
+
+  // Set an <input> value the way React expects (native setter + input event),
+  // otherwise React overwrites it on the next render.
+  function setReactInput(input, value) {
+    var desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    if (desc && desc.set) desc.set.call(input, value); else input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // First VISIBLE text <input> (the monaco source is a <textarea>, so the only
+  // text input present after "Make a copy" is the rename field).
+  function findRenameInput() {
+    var ins = document.querySelectorAll('input[type="text"], input:not([type])');
+    for (var i = 0; i < ins.length; i++) { if (ins[i].offsetParent !== null) return ins[i]; }
+    return null;
+  }
+  function pressEnter(el) {
+    ['keydown', 'keypress', 'keyup'].forEach(function (t) {
+      el.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+    });
+  }
+
+  // Open the Pine editor's script menu (the script-title dropdown in the header).
+  // The trigger is a <div class="nameButton…" aria-haspopup="menu"> showing the
+  // script name; it only responds to a NATIVE .click() (not synthetic events).
+  function openScriptMenu() {
+    var dlg = document.querySelector('[data-name="pine-dialog"]');
+    if (!dlg) return false;
+    var trig = dlg.querySelector('[class*="nameButton"], [aria-haspopup="menu"], [aria-haspopup="true"], [data-name*="title"]');
+    if (!trig) return false;
+    trig.click();
+    return true;
+  }
+
+  var COPY_RE = new RegExp(L.copy, 'i');
+  var CREATE_RE = new RegExp(L.createNew, 'i');
+  var CONFIRM_RE = new RegExp(L.confirm, 'i');
+
+  // "Make a copy" → forks the current script to a NEW saved id (non-destructive),
+  // then renames the copy to `name`. The menu items + the rename prompt need
+  // NATIVE .click()/Enter — synthetic MouseEvents are ignored. The prompt has no
+  // OK button; it confirms on Enter. Returns the new name.
+  async function makeCopy(name) {
+    if (!openScriptMenu()) return { ok: false, error: 'could not open Pine script menu' };
+    await sleep(350);
+    var item = findLabel(COPY_RE, document, '[role="menuitem"], [aria-label]');
+    if (!item) return { ok: false, error: 'Make-a-copy menu item not found (locale?)' };
+    item.click();
+    await sleep(500);
+    var input = findRenameInput();
+    if (!input) return { ok: false, error: 'copy rename prompt not found' };
+    input.focus();
+    if (name) setReactInput(input, name);
+    var finalName = input.value;
+    pressEnter(input);
+    // Fallback: click an explicit confirm button if this build shows one.
+    var box = input.closest('[role="dialog"], [class*="dialog"], [class*="popup"]') || document;
+    var confirm = findLabel(CONFIRM_RE, box, 'button');
+    if (confirm) confirm.click();
+    await sleep(700);
+    return { ok: true, value: finalName || name || null };
+  }
+
+  // "Create new" → fresh blank script of `type` in its own slot (non-destructive).
+  async function createNew(type) {
+    if (!openScriptMenu()) return { ok: false, error: 'could not open Pine script menu' };
+    await sleep(350);
+    var entry = findLabel(CREATE_RE, document, '[role="menuitem"], [aria-label]');
+    if (!entry) return { ok: false, error: 'Create-new menu item not found (locale?)' };
+    entry.click();
+    await sleep(350);
+    var typeRe = new RegExp((L.type && L.type[type]) || L.type.indicator, 'i');
+    var typeItem = findLabel(typeRe, document, '[role="menuitem"], [aria-label]');
+    if (!typeItem) return { ok: false, error: 'Create-new "' + type + '" submenu item not found' };
+    typeItem.click();
+    await sleep(500);
+    return { ok: true, value: type };
+  }
+
   // The "add to chart" control matched by title OR text, locale-aware (the
   // button has no data-name/aria-label; in a Korean UI its title is "차트에 넣기").
-  var ADD_RE = /save and add to chart|add to chart|update on chart|차트에 넣기|차트에 추가|차트에 적용/i;
+  var ADD_RE = new RegExp(L.add, 'i');
   function clickCompile() {
     var btns = Array.prototype.slice.call(document.querySelectorAll('button, [role="button"]'));
     for (var i = 0; i < btns.length; i++) {
@@ -180,6 +278,8 @@ function INSTALL(version) {
           case 'editor.activate': { var ea = editorOr(args.editor); return ea.err ? { ok: false, error: ea.err } : { ok: true, value: ea.acc.activate() }; }
           case 'editor.focusInput': return { ok: true, value: focusEditorInput() };
           case 'editor.compile': return { ok: true, value: clickCompile() };
+          case 'editor.makeCopy': return await makeCopy(args.name);
+          case 'editor.createNew': return await createNew(args.type || 'indicator');
           case 'editor.console': return { ok: true, value: readConsole() };
           default: return { ok: false, error: 'unknown bridge method "' + method + '"' };
         }
@@ -189,4 +289,4 @@ function INSTALL(version) {
   return version;
 }
 
-export const BRIDGE_SOURCE = `(${INSTALL.toString()})(${BRIDGE_VERSION})`;
+export const BRIDGE_SOURCE = `(${INSTALL.toString()})(${BRIDGE_VERSION}, ${JSON.stringify(LOCALE)})`;
