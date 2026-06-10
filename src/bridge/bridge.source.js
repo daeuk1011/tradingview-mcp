@@ -1,7 +1,7 @@
 // src/bridge/bridge.source.js
 import { LOCALE } from './locale.js';
 
-export const BRIDGE_VERSION = 4;
+export const BRIDGE_VERSION = 5;
 
 // The body installs window.__tvmcp. Authored as a normal function so it stays
 // readable/lintable; we inject `fn.toString()` wrapped in an IIFE. `L` carries
@@ -139,13 +139,6 @@ function INSTALL(version, L) {
     return null;
   }
 
-  // The currently-open dialog (rename/copy prompt), if any.
-  function openDialog() {
-    var ds = document.querySelectorAll('[role="dialog"], [class*="dialog"]');
-    for (var i = 0; i < ds.length; i++) { if (ds[i].offsetParent !== null) return ds[i]; }
-    return null;
-  }
-
   // Set an <input> value the way React expects (native setter + input event),
   // otherwise React overwrites it on the next render.
   function setReactInput(input, value) {
@@ -155,19 +148,28 @@ function INSTALL(version, L) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  // First VISIBLE text <input> (the monaco source is a <textarea>, so the only
+  // text input present after "Make a copy" is the rename field).
+  function findRenameInput() {
+    var ins = document.querySelectorAll('input[type="text"], input:not([type])');
+    for (var i = 0; i < ins.length; i++) { if (ins[i].offsetParent !== null) return ins[i]; }
+    return null;
+  }
+  function pressEnter(el) {
+    ['keydown', 'keypress', 'keyup'].forEach(function (t) {
+      el.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+    });
+  }
+
   // Open the Pine editor's script menu (the script-title dropdown in the header).
+  // The trigger is a <div class="nameButton…" aria-haspopup="menu"> showing the
+  // script name; it only responds to a NATIVE .click() (not synthetic events).
   function openScriptMenu() {
     var dlg = document.querySelector('[data-name="pine-dialog"]');
     if (!dlg) return false;
-    var trig = dlg.querySelector('[aria-haspopup="true"], [data-name="pine-script-title"], [data-name*="title"]');
-    if (!trig) {
-      var cands = dlg.querySelectorAll('button, [role="button"], [class*="title"]');
-      for (var i = 0; i < cands.length; i++) {
-        if (cands[i].offsetParent !== null && (cands[i].getAttribute('aria-haspopup') || /title/i.test(cands[i].className || ''))) { trig = cands[i]; break; }
-      }
-    }
+    var trig = dlg.querySelector('[class*="nameButton"], [aria-haspopup="menu"], [aria-haspopup="true"], [data-name*="title"]');
     if (!trig) return false;
-    realClick(trig);
+    trig.click();
     return true;
   }
 
@@ -176,38 +178,42 @@ function INSTALL(version, L) {
   var CONFIRM_RE = new RegExp(L.confirm, 'i');
 
   // "Make a copy" → forks the current script to a NEW saved id (non-destructive),
-  // then renames the copy to `name` via the prompt dialog. Returns the new name.
+  // then renames the copy to `name`. The menu items + the rename prompt need
+  // NATIVE .click()/Enter — synthetic MouseEvents are ignored. The prompt has no
+  // OK button; it confirms on Enter. Returns the new name.
   async function makeCopy(name) {
     if (!openScriptMenu()) return { ok: false, error: 'could not open Pine script menu' };
-    await sleep(300);
+    await sleep(350);
     var item = findLabel(COPY_RE, document, '[role="menuitem"], [aria-label]');
     if (!item) return { ok: false, error: 'Make-a-copy menu item not found (locale?)' };
-    realClick(item);
-    await sleep(450);
-    var dlg = openDialog();
-    if (name && dlg) {
-      var input = dlg.querySelector('input[type="text"], input:not([type])');
-      if (input && input.offsetParent !== null) { setReactInput(input, name); await sleep(80); }
-    }
-    var confirm = findLabel(CONFIRM_RE, dlg || document, 'button');
-    if (!confirm) return { ok: false, error: 'copy dialog confirm button not found' };
-    realClick(confirm);
-    await sleep(600);
-    return { ok: true, value: name || null };
+    item.click();
+    await sleep(500);
+    var input = findRenameInput();
+    if (!input) return { ok: false, error: 'copy rename prompt not found' };
+    input.focus();
+    if (name) setReactInput(input, name);
+    var finalName = input.value;
+    pressEnter(input);
+    // Fallback: click an explicit confirm button if this build shows one.
+    var box = input.closest('[role="dialog"], [class*="dialog"], [class*="popup"]') || document;
+    var confirm = findLabel(CONFIRM_RE, box, 'button');
+    if (confirm) confirm.click();
+    await sleep(700);
+    return { ok: true, value: finalName || name || null };
   }
 
   // "Create new" → fresh blank script of `type` in its own slot (non-destructive).
   async function createNew(type) {
     if (!openScriptMenu()) return { ok: false, error: 'could not open Pine script menu' };
-    await sleep(300);
+    await sleep(350);
     var entry = findLabel(CREATE_RE, document, '[role="menuitem"], [aria-label]');
     if (!entry) return { ok: false, error: 'Create-new menu item not found (locale?)' };
-    realClick(entry);
+    entry.click();
     await sleep(350);
     var typeRe = new RegExp((L.type && L.type[type]) || L.type.indicator, 'i');
     var typeItem = findLabel(typeRe, document, '[role="menuitem"], [aria-label]');
     if (!typeItem) return { ok: false, error: 'Create-new "' + type + '" submenu item not found' };
-    realClick(typeItem);
+    typeItem.click();
     await sleep(500);
     return { ok: true, value: type };
   }
